@@ -6,6 +6,8 @@ GitHub Pages serves this repository's `main` branch from `/ (root)`. Keep `index
 
 The website includes a talking introduction, captions, three GitHub projects, professional experience, and a downloadable résumé. The introduction uses a synthetic voice; HeyGen's video watermark is retained.
 
+The introduction starts muted when its portrait enters view, including on the first page load, and loops while muted. **Sound on** enables narration; audible playback finishes once. Scrolling away or hiding the tab pauses playback; returning resumes it. A visitor's explicit pause or stop remains in effect until they choose play again. Reduced-motion preferences disable automatic playback. If a browser blocks autoplay, the play control remains available. Audio-only fallbacks require a click.
+
 ## Editing
 
 - `index.html`: biography, experience, education, contact details, and page metadata.

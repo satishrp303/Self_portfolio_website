@@ -1,4 +1,5 @@
 /* Cinematic edition: charcoal, warm metal, generous editorial typography. */
+.intro-sound{display:inline-flex;align-items:center;justify-content:center;gap:5px;flex-shrink:0;min-height:36px;padding:6px 8px;border:1px solid #85705266;border-radius:4px;background:#dab48315;color:#e5c59d;font-size:9px;font-weight:600;white-space:nowrap}.intro-sound svg{width:17px;height:17px}.intro-sound:hover{background:#dab48328}.intro-sound[aria-pressed="false"] .sound-on-waves,.intro-sound[aria-pressed="true"] .sound-off-cross{display:none}.intro-player:has(.intro-sound) .intro-player-main{gap:9px}.intro-player:has(.intro-sound) #intro-play{background:#dab48322;border:1px solid #dab48355;color:#e5c59d}
 .intro-video::cue{font-family:'DM Sans','Segoe UI',sans-serif;font-size:15px;color:#fff;background:#10171ddb}
 html[data-intro-medium="video"]:is([data-intro-state="playing"],[data-intro-state="paused"],[data-intro-state="ended"]) .hero-visual .floating-note{opacity:0;visibility:hidden}
 @media(max-width:680px){.intro-video::cue{font-size:10px}}

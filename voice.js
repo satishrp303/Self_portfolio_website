@@ -21,6 +21,8 @@
     const playButton = document.getElementById('intro-play');
     if (!playButton) return;
     const stopButton = document.getElementById('intro-stop');
+    const soundButton = document.getElementById('intro-sound');
+    const soundLabel = document.getElementById('intro-sound-label');
     const icon = document.getElementById('intro-icon');
     const label = document.getElementById('intro-label');
     const status = document.getElementById('intro-status');
@@ -50,6 +52,9 @@
     let backend = videoSource ? 'video' : 'audio';
     let video;
     let starting = false;
+    let inView = false;
+    let manualHold = false;
+    let playbackWasAutomatic = false;
     let requestId = 0;
     let audioContext;
     let analyser;
@@ -110,12 +115,13 @@
       const playing = next === 'playing';
       playButton.setAttribute('aria-pressed', String(playing));
       playButton.setAttribute('aria-label', playing ? 'Pause introduction' : next === 'paused' ? 'Resume introduction' : next === 'ended' ? 'Replay introduction' : 'Play introduction');
-      if (label) label.textContent = playing ? 'Pause introduction' : next === 'paused' ? 'Resume introduction' : next === 'ended' ? 'Replay introduction' : 'Meet Satish';
+      if (label) label.textContent = backend === 'video' ? 'Meet Satish' : playing ? 'Pause introduction' : next === 'paused' ? 'Resume introduction' : next === 'ended' ? 'Replay introduction' : 'Meet Satish';
       if (icon) icon.innerHTML = playing ? PAUSE_ICON : PLAY_ICON;
       if (stopButton) stopButton.hidden = !(playing || next === 'paused');
       if (canvas) canvas.classList.toggle('is-speaking', playing && backend === 'audio' && !motionPreference.matches);
       if (video && next === 'ready') video.hidden = true;
-      if (status) status.textContent = message || ({ready: backend === 'video' ? 'Video introduction · Sound on' : 'Voice introduction · Sound on', playing: backend === 'video' ? 'Introducing Satish · Video' : 'Introducing Satish · Synthetic voice', paused: 'Introduction paused', ended: 'Thanks for listening', error: 'The introduction is unavailable. Read the transcript below.'})[next];
+      if (status) status.textContent = message || ({ready: backend === 'video' ? 'A digital hello · Captions on' : 'Voice introduction · Sound on', playing: backend === 'video' ? video.muted ? 'Sound off · Captions on' : 'Introducing myself · Sound on' : 'Introducing Satish · Synthetic voice', paused: 'Introduction paused', ended: 'Thanks for listening', error: 'The introduction is unavailable. Read the transcript below.'})[next];
+      updateSoundControls();
       if (next === 'ready' || next === 'ended' || next === 'error') setCaption(INTRO);
       if (playing) startFrames();
       else {
@@ -128,6 +134,15 @@
       document.dispatchEvent(new CustomEvent('satish:intro-state', {detail: {state: next}}));
     }
 
+    function updateSoundControls() {
+      if (!soundButton) return;
+      soundButton.hidden = backend !== 'video';
+      const muted = video?.muted !== false;
+      soundButton.setAttribute('aria-label', muted ? 'Turn on introduction sound' : 'Mute introduction');
+      soundButton.setAttribute('aria-pressed', String(!muted));
+      if (soundLabel) soundLabel.textContent = muted ? 'Sound on' : 'Mute';
+    }
+
     function setupVideo() {
       if (!videoSource) return;
       video = document.createElement('video');
@@ -135,10 +150,14 @@
       video.className = 'intro-video';
       video.preload = 'metadata';
       video.playsInline = true;
+      video.muted = true;
+      video.defaultMuted = true;
+      video.loop = !motionPreference.matches;
       video.controls = false;
       video.hidden = true;
       video.setAttribute('aria-label', 'Satish Patil’s video introduction');
       video.setAttribute('playsinline', '');
+      video.setAttribute('muted', '');
       video.poster = canvas?.dataset.src || fallback?.getAttribute('src') || '';
       Object.assign(video.style, {position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'contain'});
       if (videoCaptions) {
@@ -156,7 +175,16 @@
       video.addEventListener('loadedmetadata', updateProgress);
       video.addEventListener('loadeddata', () => { if (backend === 'video' && state !== 'ready') video.hidden = false; });
       video.addEventListener('timeupdate', updateProgress);
-      video.addEventListener('ended', () => { if (backend === 'video') setState('ended'); });
+      video.addEventListener('ended', () => {
+        if (backend === 'video') {
+          manualHold = true;
+          setState('ended');
+        }
+      });
+      video.addEventListener('volumechange', () => {
+        updateSoundControls();
+        if (backend === 'video' && state === 'playing') setState('playing');
+      });
       video.addEventListener('error', () => {
         if (backend !== 'video') return;
         requestId++;
@@ -331,7 +359,10 @@
     }
 
     function pause() {
-      if (state !== 'playing') return;
+      if (state !== 'playing' && !starting) return;
+      requestId++;
+      starting = false;
+      playButton.removeAttribute('aria-busy');
       if (backend !== 'speech') activeMedia().pause();
       else {
         speechElapsed += (performance.now() - speechStartedAt) / 1000;
@@ -340,9 +371,10 @@
       setState('paused');
     }
 
-    async function play() {
-      if (starting) return;
-      if (state === 'playing') { pause(); return; }
+    async function play(automatic = false) {
+      if (starting || state === 'playing') return;
+      if (automatic && (backend !== 'video' || manualHold || !inView || document.hidden || motionPreference.matches || state === 'ended' || state === 'error')) return;
+      playbackWasAutomatic = automatic;
       if (state === 'paused' && backend === 'speech') {
         speechStartedAt = performance.now();
         speechSynthesis.resume();
@@ -360,14 +392,19 @@
       try {
         if (backend === 'audio') await setupAudioGraph();
         if (pending !== requestId) return;
-        await media.play();
-        if (pending !== requestId) { media.pause(); return; }
         if (backend === 'video') video.hidden = false;
-        if (document.hidden) { media.pause(); setState('paused'); return; }
+        await media.play();
+        // A newer request owns the element after a cancellation or rapid re-entry.
+        if (pending !== requestId) return;
+        if (document.hidden || (automatic && (!inView || manualHold || motionPreference.matches))) { media.pause(); setState('paused'); return; }
         setState('playing');
       } catch (error) {
         if (pending !== requestId) return;
-        if (error.name === 'NotAllowedError') setState('error', 'Select Meet Satish to enable audio, or read the introduction below.');
+        if (automatic || error.name === 'AbortError') {
+          media.pause();
+          setState('paused', 'Select play to meet Satish');
+        }
+        else if (error.name === 'NotAllowedError') setState('error', 'Select play to meet Satish, or read the introduction below.');
         else if (backend === 'video') {
           video.hidden = true;
           backend = 'audio';
@@ -395,8 +432,55 @@
       setState('ready');
     }
 
-    playButton.addEventListener('click', play);
-    stopButton?.addEventListener('click', stop);
+    function syncAutomaticPlayback() {
+      if (document.hidden || !inView) pause();
+      else void play(true);
+    }
+
+    function setupAutomaticPlayback() {
+      const frame = canvas?.parentElement || heroVisual;
+      if (!video || !frame) return;
+      if ('IntersectionObserver' in window) {
+        new IntersectionObserver(([entry]) => {
+          inView = entry.isIntersecting && entry.intersectionRatio >= 0.35;
+          syncAutomaticPlayback();
+        }, {threshold: [0, 0.35], rootMargin: '-80px 0px 0px 0px'}).observe(frame);
+      } else {
+        const checkVisibility = () => {
+          const rect = frame.getBoundingClientRect();
+          const visibleHeight = Math.max(0, Math.min(rect.bottom, innerHeight) - Math.max(rect.top, 80));
+          inView = visibleHeight >= rect.height * 0.35;
+          syncAutomaticPlayback();
+        };
+        window.addEventListener('scroll', checkVisibility, {passive: true});
+        window.addEventListener('resize', checkVisibility, {passive: true});
+        checkVisibility();
+      }
+      heroVisual?.addEventListener('pointerenter', (event) => {
+        if (event.pointerType === 'mouse') syncAutomaticPlayback();
+      });
+    }
+
+    playButton.addEventListener('click', () => {
+      if (state === 'playing' || starting) {
+        manualHold = true;
+        pause();
+      } else {
+        manualHold = false;
+        void play();
+      }
+    });
+    stopButton?.addEventListener('click', () => { manualHold = true; stop(); });
+    soundButton?.addEventListener('click', () => {
+      if (backend !== 'video') return;
+      video.muted = !video.muted;
+      video.loop = video.muted && !motionPreference.matches;
+      updateSoundControls();
+      if (!video.muted) {
+        playbackWasAutomatic = false;
+        if (!manualHold) void play();
+      }
+    });
     audio.addEventListener('loadedmetadata', updateProgress);
     audio.addEventListener('timeupdate', updateProgress);
     audio.addEventListener('ended', () => { if (backend === 'audio') setState('ended'); });
@@ -406,17 +490,23 @@
         setState('error', 'Audio was interrupted. Select Meet Satish to try again.');
       }
     });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
-    window.addEventListener('pagehide', stop);
+    document.addEventListener('visibilitychange', syncAutomaticPlayback);
+    window.addEventListener('pagehide', pause);
+    window.addEventListener('pageshow', syncAutomaticPlayback);
     const updateMotion = () => {
       canvas?.classList.toggle('is-speaking', state === 'playing' && backend === 'audio' && !motionPreference.matches);
-      if (motionPreference.matches) drawPortrait(0);
+      if (video) video.loop = video.muted && !motionPreference.matches;
+      if (motionPreference.matches) {
+        drawPortrait(0);
+        if (playbackWasAutomatic) pause();
+      } else syncAutomaticPlayback();
     };
     if (motionPreference.addEventListener) motionPreference.addEventListener('change', updateMotion);
     else motionPreference.addListener(updateMotion);
     setupVideo();
     setupPortrait();
     setState('ready');
+    setupAutomaticPlayback();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, {once: true});
